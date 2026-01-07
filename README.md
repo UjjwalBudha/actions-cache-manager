@@ -23,6 +23,16 @@ jobs:
         uses: UjjwalBudha/actions-cache-manager@main
         with:
           dry-run: 'true'
+
+### Permissions
+
+If your workflow explicitly defines `permissions`, you must include `actions: write`:
+
+```yaml
+permissions:
+  actions: write
+  contents: read # Required for actions/checkout
+```
 ```
 
 ### Inputs
