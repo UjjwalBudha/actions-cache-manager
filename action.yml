@@ -1,0 +1,120 @@
+name: 'Clean Old GitHub Actions Cache'
+description: 'Selectively cleans old GitHub Actions caches while preserving recent ones.'
+branding:
+  icon: 'archive'
+  color: 'orange'
+inputs:
+  github-token:
+    description: 'Your GITHUB_TOKEN.'
+    required: false
+    default: ${{ github.token }}
+  dry-run:
+    description: 'List caches only, do not clear them.'
+    required: false
+    default: 'false'
+  page-size:
+    description: 'Page size for cache listing.'
+    required: false
+    default: '100'
+  keep-recent:
+    description: 'Number of recent caches to keep (sorted by creation date).'
+    required: false
+    default: '5'
+  older-than-days:
+    description: 'Delete caches older than this many days.'
+    required: false
+    default: ''
+runs:
+  using: "composite"
+  steps:
+    - name: List and filter caches
+      id: list-caches
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        PAGE_SIZE: ${{ inputs.page-size }}
+        KEEP_RECENT: ${{ inputs.keep-recent }}
+        OLDER_THAN_DAYS: ${{ inputs.older-than-days }}
+      run: |
+        function list_caches {
+          local pageindex="$1"
+          gh api \
+            -H 'Accept: application/vnd.github+json' \
+            "/repos/${GITHUB_REPOSITORY}/actions/caches?per_page=${PAGE_SIZE}&page=${pageindex}"
+        }
+
+        pageindex=1
+        all_caches_json="[]"
+
+        echo "fetching page ${pageindex}..."
+        first="$(list_caches "${pageindex}")"
+        total_count="$(jq -r '.total_count' <<< "${first}")"
+        all_caches_json="$(jq '.actions_caches' <<< "${first}")"
+
+        remaining="$((total_count-PAGE_SIZE))"
+        echo "  found $(jq 'length' <<< "${all_caches_json}") caches in page ${pageindex}, ${remaining} remaining."
+        
+        while [[ $remaining > 0 ]]; do
+          pageindex="$((pageindex+1))"
+          echo "fetching page ${pageindex}..."
+          page_caches="$(list_caches "${pageindex}" | jq '.actions_caches')"
+          all_caches_json="$(jq '. + '"${page_caches}" <<< "${all_caches_json}")"
+
+          remaining="$((remaining-PAGE_SIZE))"
+          if [[ $remaining < 0 ]]; then remaining=0; fi
+          echo "  found $(jq 'length' <<< "${page_caches}") caches in page ${pageindex}, ${remaining} remaining."
+        done
+
+        echo "Total caches found: $(jq 'length' <<< "${all_caches_json}")"
+
+        # Sort caches by created_at (newest first)
+        sorted_caches="$(jq 'sort_by(.created_at) | reverse' <<< "${all_caches_json}")"
+
+        # Filter caches based on strategy
+        if [[ -n "${OLDER_THAN_DAYS}" && "${OLDER_THAN_DAYS}" != "" ]]; then
+          # Delete caches older than specified days
+          cutoff_date="$(date -d "${OLDER_THAN_DAYS} days ago" --iso-8601=seconds)"
+          caches_to_delete="$(jq --arg cutoff "${cutoff_date}" '[.[] | select(.created_at < $cutoff)]' <<< "${sorted_caches}")"
+          echo "Using date-based filtering: deleting caches older than ${OLDER_THAN_DAYS} days (before ${cutoff_date})"
+        else
+          # Keep recent N caches, delete the rest
+          caches_to_delete="$(jq --argjson keep "${KEEP_RECENT}" '.[(\$keep):]' <<< "${sorted_caches}")"
+          echo "Using count-based filtering: keeping ${KEEP_RECENT} most recent caches"
+        fi
+
+        delete_ids="$(jq -r '.[].id' <<< "${caches_to_delete}" | tr '\n' ' ')"
+        keep_count="$(($(jq 'length' <<< "${sorted_caches}") - $(jq 'length' <<< "${caches_to_delete}")))"
+        
+        echo "Caches to keep: ${keep_count}"
+        echo "Caches to delete: $(jq 'length' <<< "${caches_to_delete}")"
+        echo "Cache IDs to delete: ${delete_ids}"
+        
+        echo "cache_ids=${delete_ids}" >> "$GITHUB_OUTPUT"
+
+    - name: Wipe old caches
+      id: wipe
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        cache_ids="${{ steps.list-caches.outputs.cache_ids }}"
+        if [[ -z "${cache_ids// /}" ]]; then
+          echo "No caches to delete."
+          exit 0
+        fi
+
+        for id in ${cache_ids}; do
+          if [[ "${{ inputs.dry-run }}" == 'true' ]]; then
+            echo "would delete cache $id using following command:"
+            echo gh api \
+              --method DELETE \
+              -H 'Accept: application/vnd.github+json' \
+              "/repos/${GITHUB_REPOSITORY}/actions/caches/$id"
+          else
+            echo "deleting cache $id"
+            gh api \
+              --method DELETE \
+              -H 'Accept: application/vnd.github+json' \
+              "/repos/${GITHUB_REPOSITORY}/actions/caches/$id"
+          fi
+        done

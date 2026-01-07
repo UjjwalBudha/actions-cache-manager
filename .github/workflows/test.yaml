@@ -1,0 +1,47 @@
+name: Test action
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  create-caches:
+    name: Prepare action test
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Init Cache 1
+        uses: actions/cache@v4
+        with:
+          path: .cache-test/one
+          key: ${{ runner.os }}-test-1
+      - name: Init Cache 2
+        uses: actions/cache@v4
+        with:
+          path: .cache-test/two
+          key: ${{ runner.os }}-test-2
+      - name: Init Cache 3
+        uses: actions/cache@v4
+        with:
+          path: .cache-test/three
+          key: ${{ runner.os }}-test-3
+      - name: Fill Caches
+        run: |
+          for i in one two three; do
+            mkdir -p ".cache-test/$i"
+            echo $i >> ".cache-test/$i/$i"
+          done
+
+  test-action:
+    name: Test action
+    runs-on: ubuntu-22.04
+    needs: create-caches
+
+    steps:
+      - name: Check out Cache Manager action
+        uses: actions/checkout@v4
+        with:
+          path: ./.github/actions/wipe-cache
+
+      - name: Run Cache Manager action
+        uses: ./.github/actions/wipe-cache
+        with:
+          page-size: 2
