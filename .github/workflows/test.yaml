@@ -39,9 +39,9 @@ jobs:
       - name: Check out Cache Manager action
         uses: actions/checkout@v4
         with:
-          path: ./.github/actions/wipe-cache
+          path: ./.github/actions/actions-cache-manager
 
       - name: Run Cache Manager action
-        uses: ./.github/actions/wipe-cache
+        uses: ./.github/actions/actions-cache-manager
         with:
           page-size: 2

@@ -1,4 +1,4 @@
-name: 'Clean Old GitHub Actions Cache'
+name: 'GitHub Actions Cache Manager'
 description: 'Selectively cleans old GitHub Actions caches while preserving recent ones.'
 branding:
   icon: 'archive'
@@ -78,7 +78,7 @@ runs:
           echo "Using date-based filtering: deleting caches older than ${OLDER_THAN_DAYS} days (before ${cutoff_date})"
         else
           # Keep recent N caches, delete the rest
-          caches_to_delete="$(jq --argjson keep "${KEEP_RECENT}" '.[(\$keep):]' <<< "${sorted_caches}")"
+          caches_to_delete="$(jq --argjson keep "${KEEP_RECENT}" '.[$keep:]' <<< "${sorted_caches}")"
           echo "Using count-based filtering: keeping ${KEEP_RECENT} most recent caches"
         fi
 
